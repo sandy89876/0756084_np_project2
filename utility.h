@@ -35,3 +35,21 @@ void childHandler(int signo){
     int status;
     while(waitpid(-1, &status, WNOHANG) > 0){}
 }
+
+string welcome_msg = "***************************************\n"\
+"** Welcome to the information server **\n"\
+"***************************************\n";
+
+string stars = "***";
+
+string concat_ip(string ip, uint16_t port){
+    string tmp = ip.append("/");
+    tmp += to_string(port);
+    return tmp;
+}
+
+string login_msg(string name, string ip){
+    string tmp = stars + " User '"+ name +\
+         "' entered from " + ip + ". " + stars + "\n";
+    return tmp;
+}
