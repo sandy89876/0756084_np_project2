@@ -43,6 +43,11 @@ string change_name_msg(string name, string ip){
     return tmp;
 }
 
+string name_exist_msg(string name){
+    string tmp = stars + " User '" + name + "' already exists. " + stars + "\n";
+    return tmp;
+}
+
 string yell_msg(string name, string content){
     string tmp = stars + " " + name + " yelled " + stars + ": " + content + "\n";
     return tmp;
@@ -53,9 +58,9 @@ string user_info_msg(vector<client> &client_list, int id){
     sort(client_list.begin(), client_list.end(), comp_client_id);
     for(vector<client>::iterator it = client_list.begin(); it != client_list.end(); ++it){
         if(it->id == id){
-            tmp.append(to_string(id)+ "    " + it->name + "     " + it->ip + "    <-me\n");
+            tmp.append(to_string(it->id)+ "    " + it->name + "     " + it->ip + "    <-me\n");
         }else{
-            tmp.append(to_string(id)+ "    " + it->name + "    " + it->ip + "\n");
+            tmp.append(to_string(it->id)+ "    " + it->name + "    " + it->ip + "\n");
         }
     }
     return tmp;

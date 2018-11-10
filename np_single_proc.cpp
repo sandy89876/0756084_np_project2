@@ -49,6 +49,7 @@ void new_client_handler();
 void set_client_env(client &cur_client);
 client* get_client_by_socketfd(int socket);
 int get_client_socketfd_by_id(int id);
+bool user_name_exist(string name);
 
 int socketfd;
 struct sockaddr_in serv_addr, cli_addr;
@@ -304,12 +305,12 @@ bool check_and_set_same_pipe_out(set<unhandled_pipe_obj> unhandled_pipe_obj_set,
 }
 
 void close_connection_handler(client &cur_client){
+    //broadcast user leave message
+    broadcast_msg(logout_msg(cur_client.name));
+
     close(cur_client.socket_fd);
     //delete fd from all_fds
     FD_CLR(cur_client.socket_fd, &all_fds);
-
-    //broadcast user leave message
-    broadcast_msg(logout_msg(cur_client.name));
 
     //delete client from client_list
     for(vector<client>::iterator it = client_list.begin(); it != client_list.end(); ++it){
@@ -352,6 +353,15 @@ client* get_client_by_socketfd(int socket){
             return &(*it);
         }
     }
+}
+
+bool user_name_exist(string name){
+    for(vector<client>::iterator it = client_list.begin(); it != client_list.end(); ++it){
+        if(it->name == name){
+            return true;
+        }
+    }
+    return false;
 }
 
 void new_client_handler(){
@@ -434,12 +444,18 @@ void client_handler(int cli_socketfd){
                 }
             }else if(inputLine.find("printenv") == 0){
                 char* tmp = getenv(tokens[1].c_str());
-                tmp[strlen(tmp)] = '\n';
-                tmp[strlen(tmp)] = '\r';
-                send(cli_socketfd,tmp,strlen(tmp)+1,0);
+                size_t len = strlen(tmp);
+                tmp[len] = '\n';
+                tmp[len+1] = '\0';
+                send(cli_socketfd,tmp,strlen(tmp),0);
             }else if(inputLine.find("name") == 0){
-                cur_client->name = tokens[1];
-                broadcast_msg(change_name_msg(cur_client->name, cur_client->ip));
+                if(user_name_exist(tokens[1])){
+                    string tmp = name_exist_msg(tokens[1]);
+                    send(cli_socketfd, tmp.c_str(), tmp.length(), 0);
+                }else{
+                    cur_client->name = tokens[1];
+                    broadcast_msg(change_name_msg(cur_client->name, cur_client->ip));
+                }
             }else if(inputLine.find("yell") == 0){
                 string yell_content = inputLine.substr(inputLine.find("yell")+5);
                 broadcast_msg(yell_msg(cur_client->name, yell_content));
