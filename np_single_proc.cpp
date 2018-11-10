@@ -98,8 +98,12 @@ int main(int argc, const char * argv[]){
     while(1){
         tmp_fds = all_fds;
         if(select(fdmax+1, &tmp_fds, NULL, NULL, NULL) == -1){
-            perror("select");
-            exit(4);
+            if(errno == EINTR){
+                continue;
+            }else{
+                perror("select");
+                exit(4);
+            }
         }
 
         for(int i = 0; i <= fdmax; i++){
@@ -433,7 +437,7 @@ void client_handler(int cli_socketfd){
                 }
 
                 signal(SIGCHLD, childHandler);
-
+                
                 int p_id;
                 while((p_id = fork()) < 0) usleep(1000);
                 if(p_id == 0){
