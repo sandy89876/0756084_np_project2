@@ -62,6 +62,11 @@ string yell_msg(string name, string content){
     return tmp;
 }
 
+string tell_msg(string name, string content){
+    string tmp = stars + " " + name + " told you " + stars + ": " + content + "\n";
+    return tmp;
+}
+
 string user_info_msg(vector<client> &client_list, int id){
     string tmp = "<ID> <nickname>    <IP/port>    <indicate me>\n";
     
@@ -91,6 +96,12 @@ string user_pipe_not_exist_msg(int sender_id, int recv_id){
     return tmp;
 }
 
-string pipe_to_user_msg(string sender_name, int sender_id, string recv_name, int recv_id, command cmd){
-    //string tmp = stars + " " + sender_name + " (#" + sender_id + ") just piped '" + cmd.name + 
+string pipe_to_user_msg(string sender_name, int sender_id, string recv_name, int recv_id, string content){
+    string tmp = stars + " " + sender_name + " (#" + to_string(sender_id) + ") just piped '" + content + "' to " + recv_name + " (#" + to_string(recv_id) + ") " + stars + "\n";
+    return tmp;
+}
+
+string read_from_user_pipe(string sender_name, int sender_id, string recv_name, int recv_id, string content){
+    string tmp = stars + " " + recv_name + " (#" + to_string(recv_id) + ") just received from " + sender_name + " (#" + to_string(sender_id) + ") by '" + content + "' " + stars + "\n";
+    return tmp;
 }

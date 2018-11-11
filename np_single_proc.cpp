@@ -35,7 +35,7 @@ using namespace std;
 vector<string> split_line(string input,char* delimeter);
 set<string> get_known_command_set();
 void set_pipe_array(int* pipe_array);
-void parse_cmd(client &cur_client, vector<string> &tokens);
+void parse_cmd(client &cur_client, vector<string> &tokens, string inputLine);//inputLine for boardcasting userpipe msg
 void set_current_cmd_pipe_out(command cmd);
 void execute_cmd(command cmd);
 bool check_and_set_same_pipe_out(set<unhandled_pipe_obj> unhandled_pipe_obj_set, int exe_line_num, int* pipe_array);
@@ -49,6 +49,7 @@ void new_client_handler();
 void set_client_env(client &cur_client);
 client* get_client_by_socketfd(int socket);
 int get_client_socketfd_by_id(int id);
+string get_client_name_by_id(int id);
 bool user_name_exist(string name);
 bool user_exist(int id);
 bool user_pipe_exist(int sender_id, int recv_id);
@@ -178,7 +179,7 @@ void set_pipe_array(int* pipe_array){
     }
 }
 
-void parse_cmd(client &cur_client, vector<string> &tokens){
+void parse_cmd(client &cur_client, vector<string> &tokens, string inputLine){
     for(int i = 0; i < tokens.size(); i++){
         if(tokens[i] == ">"){
                
@@ -291,13 +292,11 @@ void parse_cmd(client &cur_client, vector<string> &tokens){
                 cur_user_pipe.pipe_arr[0] = (last_cmd->pipe_arr)[0];
                 cur_user_pipe.pipe_arr[1] = (last_cmd->pipe_arr)[1];
                 user_pipe_set.insert(cur_user_pipe);
-            }
-            /* write file for 3rd server
-            command *last_cmd = &(cur_client.current_job_queue.back());
-            last_cmd->is_write_file = true;
-            last_cmd->write_file_name = cur_client.id + "_" + tokens[i].substr(1);
-            */
 
+                //broadcast write to user pipe msg 
+                string msg = pipe_to_user_msg(cur_client.name, cur_client.id, get_client_name_by_id(dest_user_id), dest_user_id, inputLine);
+                broadcast_msg(msg);
+            }
         }else if(is_read_from_user_pipe(tokens[i])){
             // <n
             int src_user_id = stoi(tokens[i].substr(1));
@@ -331,6 +330,10 @@ void parse_cmd(client &cur_client, vector<string> &tokens){
                         break;
                     }
                 }
+
+                //broadcast write to user pipe msg
+                string msg = read_from_user_pipe(get_client_name_by_id(src_user_id), src_user_id, cur_client.name, cur_client.id, inputLine);
+                broadcast_msg(msg);
             }
         }else{
             //Unknown command
@@ -384,24 +387,6 @@ bool check_and_set_same_pipe_out(set<unhandled_pipe_obj> unhandled_pipe_obj_set,
     return false;
 }
 
-void close_connection_handler(client &cur_client){
-    //broadcast user leave message
-    broadcast_msg(logout_msg(cur_client.name));
-    user_id_used[cur_client.id-1] = false;
-    //todo:delete user_pipe
-    close(cur_client.socket_fd);
-    //delete fd from all_fds
-    FD_CLR(cur_client.socket_fd, &all_fds);
-
-    //delete client from client_list
-    for(vector<client>::iterator it = client_list.begin(); it != client_list.end(); ++it){
-        if(it->socket_fd == cur_client.socket_fd){
-            client_list.erase(it);
-            break;
-        }
-    }
-    cur_client.current_job_queue.clear();
-}
 
 int assign_user_id(){
     for(int i = 0; i < 30; i++){
@@ -420,11 +405,11 @@ int get_client_socketfd_by_id(int id){
     }
 }
 
-void broadcast_msg(string msg){
-    //broadcast msg
-    char* tmp = strdup(msg.c_str());
+string get_client_name_by_id(int id){
     for(vector<client>::iterator it = client_list.begin(); it != client_list.end(); ++it){
-        send(it->socket_fd,tmp,strlen(tmp),0);
+        if(it->id == id){
+            return it->name;
+        }
     }
 }
 
@@ -463,6 +448,50 @@ bool user_pipe_exist(int sender_id, int recv_id){
     return false;
 }
 
+void set_client_env(client &cur_client){
+    map<string, string> env_setting = cur_client.env_setting;
+    for(map<string, string>::iterator it = env_setting.begin(); it != env_setting.end(); ++it){
+        setenv((it->first).c_str(), (it->second).c_str(), 1);
+    }
+    cur_client.command_set = get_known_command_set();
+}
+
+void broadcast_msg(string msg){
+    //broadcast msg
+    char* tmp = strdup(msg.c_str());
+    for(vector<client>::iterator it = client_list.begin(); it != client_list.end(); ++it){
+        send(it->socket_fd,tmp,strlen(tmp),0);
+    }
+}
+
+void close_connection_handler(client &cur_client){
+    //broadcast user leave message
+    broadcast_msg(logout_msg(cur_client.name));
+    user_id_used[cur_client.id-1] = false;
+
+    //close related user_pipe and delete from user_pipe_set
+    for(set<user_pipe_info>::iterator it = user_pipe_set.begin(); it != user_pipe_set.end(); ++it){
+        if(it->sender_id == cur_client.id || it->recv_id == cur_client.id){
+            close(it->pipe_arr[0]);
+            close(it->pipe_arr[1]);
+            user_pipe_set.erase(it);
+        }
+    }
+
+    close(cur_client.socket_fd);
+    //delete fd from all_fds
+    FD_CLR(cur_client.socket_fd, &all_fds);
+
+    //delete client from client_list
+    for(vector<client>::iterator it = client_list.begin(); it != client_list.end(); ++it){
+        if(it->socket_fd == cur_client.socket_fd){
+            client_list.erase(it);
+            break;
+        }
+    }
+    cur_client.current_job_queue.clear();
+}
+
 void new_client_handler(){
     int clilen = sizeof(cli_addr);
     int cli_socketfd = accept(socketfd, (struct sockaddr *)&cli_addr, (socklen_t*)&clilen);
@@ -491,14 +520,6 @@ void new_client_handler(){
     send(cli_socketfd,"% ",3,0);
 }
 
-void set_client_env(client &cur_client){
-    map<string, string> env_setting = cur_client.env_setting;
-    for(map<string, string>::iterator it = env_setting.begin(); it != env_setting.end(); ++it){
-        setenv((it->first).c_str(), (it->second).c_str(), 1);
-    }
-    cur_client.command_set = get_known_command_set();
-}
-
 void client_handler(int cli_socketfd){
     string inputLine;
     set<int> p_id_table;
@@ -516,13 +537,11 @@ void client_handler(int cli_socketfd){
         if((n = recv(cli_socketfd,buf,sizeof(buf),0)) > 0){
             inputLine = buf;
             inputLine = inputLine.substr(0,inputLine.find("\n")-1);
-            //cout << "inputLine:"<<inputLine<<"..."<<endl;
 
-            //count line for |n
             if(inputLine != "\0"){
                 cur_client->line_count++;
             }
-            //cout << "line:" <<line_count<<endl;
+
             if(inputLine.compare("exit") == 0){
                 close_connection_handler(*cur_client);
                 return;
@@ -531,8 +550,6 @@ void client_handler(int cli_socketfd){
             vector<string> tokens = split_line(inputLine, " ");
             
             if(inputLine.find("setenv") == 0){
-                // setenv(tokens[1].c_str(), tokens[2].c_str(), 1);
-                // cur_client->command_set = get_known_command_set();
                 map<string, string>::iterator it = cur_client->env_setting.find(tokens[1]);
                 if(it != cur_client->env_setting.end()){
                     //already has same key, change value
@@ -560,9 +577,10 @@ void client_handler(int cli_socketfd){
                 broadcast_msg(yell_msg(cur_client->name, yell_content));
             }else if(inputLine.find("tell") == 0){
                 if(user_exist(stoi(tokens[1]))){
-                    //todo:tell_msg
+                    
                     string content = inputLine.substr(inputLine.find(tokens[1])+2);
-                    send(get_client_socketfd_by_id(stoi(tokens[1])), content.c_str(), content.length(), 0);
+                    string msg = tell_msg(cur_client->name, content);
+                    send(get_client_socketfd_by_id(stoi(tokens[1])), msg.c_str(), msg.length(), 0);
                 }else{
                     //send user not exist error msg
                     string tmp = user_not_exist_msg(tokens[1]);
@@ -572,7 +590,7 @@ void client_handler(int cli_socketfd){
                 string info = user_info_msg(client_list, cur_client->id);
                 send(cli_socketfd, info.c_str(), info.length(), 0);
             }else{
-                parse_cmd(*cur_client, tokens);
+                parse_cmd(*cur_client, tokens, inputLine);
             }
             
             for(deque<command>::iterator it = cur_client->current_job_queue.begin(); it != cur_client->current_job_queue.end(); it++){
@@ -625,7 +643,6 @@ void client_handler(int cli_socketfd){
                         close(it->user_pipe_arr[0]);
                     }
                     execute_cmd(*it);
-
                     exit(1);
                 }else{
                     //add p_id into table
@@ -633,7 +650,6 @@ void client_handler(int cli_socketfd){
                                        
                     //if need input pipe and it has been opened, close it.
                     if(it != cur_client->current_job_queue.begin() && (it-1)->need_pipe_out){
-                        //cout << "parent close " << (it-1)->pipe_arr[0] << " and " << (it-1)->pipe_arr[1] << endl;
                         close((it-1)->pipe_arr[0]);
                         close((it-1)->pipe_arr[1]);
                     }
@@ -641,7 +657,6 @@ void client_handler(int cli_socketfd){
                     //close unhandled pipe
                     for (set<unhandled_pipe_obj>::iterator unhand_it = cur_client->unhandled_pipe_obj_set.begin(); unhand_it != cur_client->unhandled_pipe_obj_set.end(); ++unhand_it){
                         if(unhand_it->exe_line_num == cur_client->line_count){
-                            //cout << "parent close "<< it->pipe_arr[0] << " and " << it->pipe_arr[1] <<endl;
                             close(unhand_it->pipe_arr[1]);
                             close(unhand_it->pipe_arr[0]);
                         }
@@ -650,19 +665,15 @@ void client_handler(int cli_socketfd){
                     //execute finish
                     if(!it->need_pipe_out ){
                         //if this job doesn't need to pipe out,close pipe
-                        //cout << "parent close " << it->pipe_arr[0] << " and " << it->pipe_arr[1] << endl;
                         close(it->pipe_arr[0]);
                         close(it->pipe_arr[1]);
-                        //cout << "close this job pipe" << endl;
                     }
                     
                     //close previous job pipe
                     if(it != cur_client->current_job_queue.begin()){
-                        
                         command prev_cmd = *(it-1);
                         close((it-1)->pipe_arr[0]);
                         close((it-1)->pipe_arr[1]);
-                        //cout << "close previous job pipe" << endl;
                     }
 
                     //close user pipe
@@ -680,10 +691,8 @@ void client_handler(int cli_socketfd){
 
                         //wait完 delete from p_id_table
                         p_id_table.erase(*s_it);
-
                     }
                 }
-
             }
             
             cur_client->current_job_queue.clear();
