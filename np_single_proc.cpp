@@ -50,6 +50,7 @@ void set_client_env(client &cur_client);
 client* get_client_by_socketfd(int socket);
 int get_client_socketfd_by_id(int id);
 bool user_name_exist(string name);
+bool user_exist(int id);
 
 int socketfd;
 struct sockaddr_in serv_addr, cli_addr;
@@ -62,6 +63,7 @@ int fdmax;
 
 int main(int argc, const char * argv[]){
 
+    int port = atoi(argv[1]);
 
     socketfd = socket(AF_INET, SOCK_STREAM, 0);
     if(socketfd == -1) puts("Server : Could not create Internet stream socket");
@@ -71,7 +73,7 @@ int main(int argc, const char * argv[]){
     bzero((char *) &serv_addr, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    serv_addr.sin_port = htons(9999);
+    serv_addr.sin_port = htons(port);
 
     int reuse = 1;
     if (setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse)) < 0)
@@ -307,6 +309,7 @@ bool check_and_set_same_pipe_out(set<unhandled_pipe_obj> unhandled_pipe_obj_set,
 void close_connection_handler(client &cur_client){
     //broadcast user leave message
     broadcast_msg(logout_msg(cur_client.name));
+    user_id_used[cur_client.id-1] = false;
 
     close(cur_client.socket_fd);
     //delete fd from all_fds
@@ -358,6 +361,15 @@ client* get_client_by_socketfd(int socket){
 bool user_name_exist(string name){
     for(vector<client>::iterator it = client_list.begin(); it != client_list.end(); ++it){
         if(it->name == name){
+            return true;
+        }
+    }
+    return false;
+}
+
+bool user_exist(int id){
+    for(vector<client>::iterator it = client_list.begin(); it != client_list.end(); ++it){
+        if(it->id == id){
             return true;
         }
     }
@@ -460,8 +472,14 @@ void client_handler(int cli_socketfd){
                 string yell_content = inputLine.substr(inputLine.find("yell")+5);
                 broadcast_msg(yell_msg(cur_client->name, yell_content));
             }else if(inputLine.find("tell") == 0){
-                string content = inputLine.substr(inputLine.find(tokens[1])+2);
-                send(get_client_socketfd_by_id(stoi(tokens[1])), content.c_str(), content.length(), 0);
+                if(user_exist(stoi(tokens[1]))){
+                    string content = inputLine.substr(inputLine.find(tokens[1])+2);
+                    send(get_client_socketfd_by_id(stoi(tokens[1])), content.c_str(), content.length(), 0);
+                }else{
+                    //send user not exist error msg
+                    string tmp = user_not_exist_msg(tokens[1]);
+                    send(cur_client->socket_fd, tmp.c_str(), tmp.length(), 0);
+                }
             }else if(inputLine.compare("who") == 0){
                 string info = user_info_msg(client_list, cur_client->id);
                 send(cli_socketfd, info.c_str(), info.length(), 0);
