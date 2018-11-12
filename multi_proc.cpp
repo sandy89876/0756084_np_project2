@@ -213,6 +213,7 @@ void set_pipe_array(int* pipe_array){
 
 void parse_cmd(int fd, int count){
     for(int i = 0; i < tokens.size(); i++){
+        cout << "parse_cmd:" << tokens[i] << endl;
         if(tokens[i] == ">"){
                
             //set previous job need pipe out
@@ -526,8 +527,6 @@ void client_handler(client_shm &cur_client){
     int cli_socketfd = cur_client.socket_fd;
     int n;
     int line_count = 0;
-    deque<command> current_job_queue;
-    set<unhandled_pipe_obj> unhandled_pipe_obj_set;
 
     while((n = recv(cli_socketfd,buf,sizeof(buf),0)) != 0){
         string inputLine = buf;
@@ -586,7 +585,7 @@ void client_handler(client_shm &cur_client){
         }else{
             parse_cmd(cli_socketfd, line_count);
         }
-        
+
         for(deque<command>::iterator it = current_job_queue.begin(); it != current_job_queue.end(); it++){
             //if this command hasn't create pipe before,create one
             if(!it->before_numbered_pipe && !it->is_write_file){
@@ -598,7 +597,8 @@ void client_handler(client_shm &cur_client){
             int p_id;
             while((p_id = fork()) < 0) usleep(1000);
             if(p_id == 0){
-
+                dup2(cli_socketfd, STDOUT_FILENO);
+                dup2(cli_socketfd, STDERR_FILENO);
                 //child process
                 if(it == current_job_queue.begin()){
                     // this is first job
@@ -683,7 +683,6 @@ void client_handler(client_shm &cur_client){
 
                 }
             }
-
         }
         
         current_job_queue.clear();
