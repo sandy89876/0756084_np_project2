@@ -240,7 +240,6 @@ int main(int argc, const char * argv[]){
             }
             
             current_job_queue.clear();
-            unhandled_pipe_obj_set.clear();
             memset(buf, 0, sizeof(buf));
             send(cli_socketfd,"% ",2,0);
         }
