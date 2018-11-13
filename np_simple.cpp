@@ -111,7 +111,7 @@ int main(int argc, const char * argv[]){
             cout << "inputLine:"<<inputLine<<"..."<<endl;
 
             //count line for |n
-            if(inputLine != "\0"){
+            if(inputLine != "\r"){
                 line_count++;
             }
             //cout << "line:" <<line_count<<endl;
