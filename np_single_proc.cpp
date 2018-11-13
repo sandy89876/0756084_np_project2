@@ -284,6 +284,7 @@ void parse_cmd(client &cur_client, vector<string> &tokens, string inputLine){
                 last_cmd->need_pipe_out = true;
                 last_cmd->is_user_pipe_out = true;
                 set_pipe_array(last_cmd->pipe_arr);
+                last_cmd->user_pipe_dest_id = dest_user_id;
 
                 //save user pipe information
                 user_pipe_info cur_user_pipe;
@@ -293,14 +294,6 @@ void parse_cmd(client &cur_client, vector<string> &tokens, string inputLine){
                 cur_user_pipe.pipe_arr[1] = (last_cmd->pipe_arr)[1];
                 
                 user_pipe_set.insert(cur_user_pipe);
-                cout << "after insert:" << endl;
-                for(set<user_pipe_info>::iterator it = user_pipe_set.begin(); it != user_pipe_set.end(); ++it){
-                    cout << "sender_id= " << to_string(it->sender_id) << " recv_id= " << to_string(it->recv_id) << " ***\n";
-                }
-
-                //broadcast write to user pipe msg 
-                string msg = pipe_to_user_msg(cur_client.name, cur_client.id, get_client_name_by_id(dest_user_id), dest_user_id, inputLine);
-                broadcast_msg(msg);
             }
         }else if(is_read_from_user_pipe(tokens[i])){
             // <n
@@ -325,6 +318,7 @@ void parse_cmd(client &cur_client, vector<string> &tokens, string inputLine){
             }else{
                 command *last_cmd = &(cur_client.current_job_queue.back());
                 last_cmd->is_user_pipe_in = true;
+                last_cmd->user_pipe_src_id = src_user_id;
 
                 //set pipe, delete from user_pipe_set
                 for(set<user_pipe_info>::iterator it = user_pipe_set.begin(); it != user_pipe_set.end(); ++it){
@@ -335,10 +329,6 @@ void parse_cmd(client &cur_client, vector<string> &tokens, string inputLine){
                         break;
                     }
                 }
-
-                //broadcast write to user pipe msg
-                string msg = read_from_user_pipe_msg(get_client_name_by_id(src_user_id), src_user_id, cur_client.name, cur_client.id, inputLine);
-                broadcast_msg(msg);
             }
         }else{
             //Unknown command
@@ -446,7 +436,6 @@ bool user_exist(int id){
 
 bool user_pipe_exist(int sender_id, int recv_id){
     for(set<user_pipe_info>::iterator it = user_pipe_set.begin(); it != user_pipe_set.end(); ++it){
-        // cout << "$$$$$$$check user_pipe_exist sender_id= " << to_string(it->sender_id) << "recv_id= " << to_string(it->recv_id) << "$$$$$$$\n";
         if(it->sender_id == sender_id && it->recv_id == recv_id){
             return true;
         }
@@ -457,13 +446,11 @@ bool user_pipe_exist(int sender_id, int recv_id){
 void set_client_env(client &cur_client){
     map<string, string> env_setting = cur_client.env_setting;
     for(map<string, string>::iterator it = env_setting.begin(); it != env_setting.end(); ++it){
-        cout << "set client id= " << to_string(cur_client.id) << " env " << (it->first) << "to " << (it->second) << endl;
         setenv((it->first).c_str(), (it->second).c_str(), 1);
 
         char* tmp = getenv((it->first).c_str());
         char tmp_buf[500];
         sprintf(tmp_buf, "%s\n", tmp);
-        // cout << "getenv: " << tmp_buf <<endl;
     }
     cur_client.command_set = get_known_command_set();
 }
@@ -486,9 +473,6 @@ void close_connection_handler(client &cur_client){
         if(it->sender_id == cur_client.id || it->recv_id == cur_client.id){
             close(it->pipe_arr[0]);
             close(it->pipe_arr[1]);
-
-            cout << "close_handler cur_client name = " << cur_client.name <<endl;
-            cout << "erase user_pipe_set sender_id= " << to_string(it->sender_id) << " recv_id= " << to_string(it->recv_id) << endl;
             user_pipe_set.erase(it);
         }
     }
@@ -572,7 +556,7 @@ void client_handler(int cli_socketfd){
                 map<string, string>::iterator it = cur_client->env_setting.find(tokens[1]);
                 if(it != cur_client->env_setting.end()){
                     //already has same key, change value
-                   it->second = tokens[2];
+                    it->second = tokens[2];
                 }else{
                     //add new environment variable to client
                     cur_client->env_setting.insert(pair<string, string>(tokens[1], tokens[2]));
@@ -610,11 +594,23 @@ void client_handler(int cli_socketfd){
             }else{
                 parse_cmd(*cur_client, tokens, inputLine);
             }
-            
+
             for(deque<command>::iterator it = cur_client->current_job_queue.begin(); it != cur_client->current_job_queue.end(); it++){
                 //if this command hasn't create pipe before,create one
                 if(!it->before_numbered_pipe && !it->is_write_file && !it->is_user_pipe_out){
                     set_pipe_array(it->pipe_arr);
+                }
+
+                //broadcast user pipe order: read > write
+                if(it->is_user_pipe_in){
+                    //broadcast write to user pipe msg
+                    string msg = read_from_user_pipe_msg(get_client_name_by_id(it->user_pipe_src_id), it->user_pipe_src_id, cur_client->name, cur_client->id, inputLine);
+                    broadcast_msg(msg);
+                }
+                if(it->is_user_pipe_out){
+                    //broadcast write to user pipe msg 
+                    string msg = pipe_to_user_msg(cur_client->name, cur_client->id, get_client_name_by_id(it->user_pipe_dest_id), it->user_pipe_dest_id, inputLine);
+                    broadcast_msg(msg);
                 }
 
                 signal(SIGCHLD, childHandler);

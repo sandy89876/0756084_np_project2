@@ -1,7 +1,8 @@
 struct client{
     int id;
+    int p_id;
     string name = "(no name)";
-    string ip;
+    string ip = "CGILAB/511";
     int socket_fd;
     set<string> command_set;
     deque<command> current_job_queue;
@@ -20,13 +21,15 @@ struct user_pipe_info{
     int pipe_arr[2];
 };
 
-bool operator <(const user_pipe_info& x, const user_pipe_info& y){
-    return x.sender_id < y.sender_id;
+struct compare {
+    bool operator() (const user_pipe_info &lhs, const user_pipe_info& rhs) const{
+        return tie(lhs.sender_id, lhs.recv_id) < tie(rhs.sender_id, rhs.recv_id);
+    }
 };
 
-string welcome_msg = "***************************************\n"\
-"** Welcome to the information server **\n"\
-"***************************************\n";
+string welcome_msg = "****************************************\n"\
+"** Welcome to the information server. **\n"\
+"****************************************\n";
 
 string stars = "***";
 
@@ -101,7 +104,7 @@ string pipe_to_user_msg(string sender_name, int sender_id, string recv_name, int
     return tmp;
 }
 
-string read_from_user_pipe(string sender_name, int sender_id, string recv_name, int recv_id, string content){
+string read_from_user_pipe_msg(string sender_name, int sender_id, string recv_name, int recv_id, string content){
     string tmp = stars + " " + recv_name + " (#" + to_string(recv_id) + ") just received from " + sender_name + " (#" + to_string(sender_id) + ") by '" + content + "' " + stars + "\n";
     return tmp;
 }
