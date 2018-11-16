@@ -14,6 +14,8 @@ struct command{
     bool is_user_pipe_out = false;
     bool is_user_pipe_in = false;
     int user_pipe_arr[2] = {-1,-1};
+    int user_pipe_src_id;
+    int user_pipe_dest_id;
 };
 
 struct unhandled_pipe_obj{

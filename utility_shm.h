@@ -1,3 +1,12 @@
+#define buffersize 15000
+#define maxClientNum 30
+#define PERMS 0666
+#define CLIENTTABLE_SHMKEY ((key_t) 7671) //base value for shmclientTable key
+#define IDTABLE_SHMKEY ((key_t) 7672) // base value for shmidTable key
+#define MSGBUFFER_SHMKEY ((key_t) 7673) // base value for msgbuffer key
+#define USERPIPETABLE_SHMKEY ((key_t) 7674) // base value for shmUserPipeTable key
+#define UPIDTABLE_SHMKEY ((key_t) 7675) // base value for shmUPidTable key
+
 struct client_shm{
     int id;
     int p_id;

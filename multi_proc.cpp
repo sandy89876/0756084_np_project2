@@ -34,20 +34,11 @@
 
 using namespace std;
 
-#define buffersize 15000
-#define maxClientNum 30
-#define PERMS 0666
-#define CLIENTTABLE_SHMKEY ((key_t) 7671) //base value for shmclientTable key
-#define IDTABLE_SHMKEY ((key_t) 7672) // base value for shmidTable key
-#define MSGBUFFER_SHMKEY ((key_t) 7673) // base value for msgbuffer key
-#define USERPIPETABLE_SHMKEY ((key_t) 7674) // base value for shmUserPipeTable key
-#define UPIDTABLE_SHMKEY ((key_t) 7675) // base value for shmUPidTable key
-
 vector<string> split_line(string input,char* delimeter);
 void initial_setting();
 set<string> get_known_command_set();
 void set_pipe_array(int* pipe_array);
-void parse_cmd(int fd, int count, vector<string> &tokens, client_shm &cur_client);
+void parse_cmd(int fd, int count, vector<string> &tokens, client_shm &cur_client, string inputLine);
 void set_current_cmd_pipe_out(command cmd);
 void execute_cmd(command cmd);
 bool check_and_set_same_pipe_out(int exe_line_num,int* pipe_array);
@@ -69,7 +60,6 @@ void create_shm_tables();
 void attach_shm_tables();
 void detach_shm_tables();
 void sig_handler(int signo, siginfo_t *info, void *context);
-// void client_sig_handler(int sig, siginfo_t *info, void *context);
 
 set<string> command_set;
 deque<command> current_job_queue;
@@ -96,14 +86,9 @@ int shmUPidTableid;
 user_pipe_info *shmUserPipeTable;
 int shmUserPipeTableid;
 
-int main_pid;
-int tmp_pid;
-
 int main(int argc, const char * argv[]){
 
     int port = atoi(argv[1]);
-    main_pid = getpid();
-    cout <<"??? " << main_pid << endl;
     int child_p_id;
     
     socketfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -149,10 +134,7 @@ int main(int argc, const char * argv[]){
     while(1){
         //Accept connection from an incoming client
         clilen = sizeof(cli_addr);
-        cout << "before accept" << endl;
         cli_socketfd = accept(socketfd, (struct sockaddr *)&cli_addr, (socklen_t*)&clilen);
-        cout << "cli_socketfd= "<<cli_socketfd<<endl;
-        cout << "aft accept" << endl;
         if (cli_socketfd < 0){
             if (errno == EINTR)
                 continue;
@@ -170,7 +152,6 @@ int main(int argc, const char * argv[]){
             client_shm *cur_client = new_client_handler(cli_socketfd, cli_addr, shmclientTable);
             //handle connection between child
             client_handler(*cur_client, shmclientTable);
-           
             detach_shm_tables();
             
             exit(0);
@@ -181,13 +162,11 @@ int main(int argc, const char * argv[]){
             close(cli_socketfd);
 
         }
-        cout << "??" << endl;
     }
     close(socketfd);
 }
 
 set<string> get_known_command_set(){
-
     set<string> result;
     DIR *pDIR;
     struct dirent *entry;
@@ -196,21 +175,17 @@ set<string> get_known_command_set(){
     path = strdup(env_path);
     char* tmppath;
     tmppath = strtok(path,":");
-    //cout << "known commands:";
     
     if(pDIR = opendir(tmppath)){
         while(entry = readdir(pDIR)){
             //ignore . .. .DS_store
             if( entry->d_name[0] != '.'){
-                //cout << entry->d_name << " ";
                 result.insert(entry->d_name);
             }
         }
         closedir(pDIR);
     }
-    
     result.insert(">");
-    //cout << endl;
     return result;
 }
 
@@ -222,14 +197,13 @@ void set_write_file_output(string fileName){
 }
 
 void set_read_file(string fileName){
-    FILE *fp = fopen(fileName.c_str(),"w");
+    FILE *fp = fopen(fileName.c_str(),"r");
     int fp_num = fileno(fp);
     dup2(fp_num, STDIN_FILENO);
     close(fp_num);
 }
 
 void set_current_cmd_pipe_out(command cmd){
-    //cout << cmd.name << " pipe to " << cmd.pipe_arr[1] << endl;
     close(cmd.pipe_arr[0]);
     dup2(cmd.pipe_arr[1], STDOUT_FILENO);
     if(cmd.output_type == "both"){
@@ -244,11 +218,13 @@ void set_pipe_array(int* pipe_array){
     }
 }
 
-void parse_cmd(int fd, int count, vector<string> &tokens, client_shm &cur_client){
+void parse_cmd(int fd, int count, vector<string> &tokens, client_shm &cur_client, string inputLine){
+    int has_up_in = -1;
+    int has_up_out = -1;
+    string broad_msg;
+
     for(int i = 0; i < tokens.size(); i++){
-        cout << "parse_cmd:" << tokens[i] << endl;
         if(tokens[i] == ">"){
-               
             //set previous job need pipe out
             command *prev_cmd = &current_job_queue.back();
             prev_cmd->need_pipe_out = true;
@@ -304,9 +280,7 @@ void parse_cmd(int fd, int count, vector<string> &tokens, client_shm &cur_client
         }else if(tokens[i] == "|"){
             command *last_cmd = &current_job_queue.back();
             last_cmd->need_pipe_out = true;
-            //set_pipe_array(last_cmd->pipe_arr);
-            //cout << "last_cmd set pipe array " << last_cmd->pipe_arr[0] << " " << last_cmd->pipe_arr[1] << endl;
-            
+    
         }else if(command_set.count(tokens[i]) != 0){
             //*it is known command
             command cur_comm;
@@ -316,7 +290,6 @@ void parse_cmd(int fd, int count, vector<string> &tokens, client_shm &cur_client
             vector<string> parameter;
             while((i+1) != tokens.size() && !is_ordinary_pipe(tokens[i+1]) && !is_output_to_file(tokens[i+1]) && !is_stdout_numbered_pipe(tokens[i+1]) 
                 && !is_stderr_numbered_pipe(tokens[i+1]) && !is_write_to_user_pipe(tokens[i+1]) && !is_read_from_user_pipe(tokens[i+1])){
-                //cout << tokens[i];
                 parameter.push_back(tokens[++i]);
                 if(i == tokens.size()) break;
             }
@@ -329,10 +302,8 @@ void parse_cmd(int fd, int count, vector<string> &tokens, client_shm &cur_client
             if( !user_exist(dest_user_id)){
                 //receiver not exist
                 string tmp = user_not_exist_msg(tokens[i].substr(1));
-
-                // send(cur_client.socket_fd, tmp.c_str(), tmp.length(), 0);
                 strcpy(msgbuffer, tmp.c_str());
-                kill(shmclientTable[cur_client.id].p_id, SIGUSR1);
+                kill(shmclientTable[cur_client.id-1].p_id, SIGUSR1);
 
                 //ignore this line
                 current_job_queue.clear();
@@ -340,31 +311,17 @@ void parse_cmd(int fd, int count, vector<string> &tokens, client_shm &cur_client
             }else if(user_pipe_exist(cur_client.id, dest_user_id)){
                 //pipe already exist
                 string tmp = user_pipe_exist_msg(cur_client.id, dest_user_id);
-
-                // send(cur_client.socket_fd, tmp.c_str(), tmp.length(), 0);
                 strcpy(msgbuffer, tmp.c_str());
-                kill(shmclientTable[cur_client.id].p_id, SIGUSR1);
+                kill(shmclientTable[cur_client.id-1].p_id, SIGUSR1);
 
                 //ignore this line
                 current_job_queue.clear();
                 break;
             }else{
-                
                 //create user pipe
                 command *last_cmd = &(current_job_queue.back());
-                // last_cmd->need_pipe_out = true;
                 last_cmd->is_user_pipe_out = true;
-                // set_pipe_array(last_cmd->pipe_arr);
                 last_cmd->user_pipe_dest_id = dest_user_id;
-
-                /*
-                //save user pipe information
-                user_pipe_info cur_user_pipe;
-                cur_user_pipe.sender_id = cur_client.id;
-                cur_user_pipe.recv_id = dest_user_id;
-                cur_user_pipe.pipe_arr[0] = (last_cmd->pipe_arr)[0];
-                cur_user_pipe.pipe_arr[1] = (last_cmd->pipe_arr)[1];
-                */
 
                 //save user pipe information
                 user_pipe_info cur_user_pipe;
@@ -372,6 +329,7 @@ void parse_cmd(int fd, int count, vector<string> &tokens, client_shm &cur_client
                 cur_user_pipe.recv_id = dest_user_id;
                 shmUserPipeTable[assign_user_pipe_id()] = cur_user_pipe;
 
+                has_up_out = dest_user_id;
             }
         }else if(is_read_from_user_pipe(tokens[i])){
             // <n
@@ -397,24 +355,10 @@ void parse_cmd(int fd, int count, vector<string> &tokens, client_shm &cur_client
                 command *last_cmd = &(current_job_queue.back());
                 last_cmd->is_user_pipe_in = true;
                 last_cmd->user_pipe_src_id = src_user_id;
-
-                /*
-                //set pipe, delete from user_pipe_set
-                for(set<user_pipe_info>::iterator it = user_pipe_set.begin(); it != user_pipe_set.end(); ++it){
-                    if(it->sender_id == src_user_id && it->recv_id == cur_client.id){
-                        last_cmd->user_pipe_arr[0] = it->pipe_arr[0];
-                        last_cmd->user_pipe_arr[1] = it->pipe_arr[1];
-                        user_pipe_set.erase(it);
-                        break;
-                    }
-                }
-                */
-
+                has_up_in = src_user_id;
                 for(int i=0; i<900; i++){
                     if(shmUPidTable[i] == 1 && shmUserPipeTable[i].sender_id == src_user_id && shmUserPipeTable[i].recv_id == cur_client.id){
-                        // last_cmd->user_pipe_arr[0] = shmUserPipeTable[i].pipe_arr[0];
-                        // last_cmd->user_pipe_arr[1] = it->pipe_arr[1];
-                        shmUPidTable[i] == 0;
+                        shmUPidTable[i] = 0;
                         break;
                     }
                 }
@@ -429,6 +373,18 @@ void parse_cmd(int fd, int count, vector<string> &tokens, client_shm &cur_client
                 i++;
             }
         }
+    }
+
+    //broadcast msg order: recv > send
+    if(has_up_in != -1){
+        broad_msg.append(read_from_user_pipe_msg(get_client_name_by_id(has_up_in), has_up_in, cur_client.name, cur_client.id, inputLine));
+    }
+    if(has_up_out != -1){
+        broad_msg.append(pipe_to_user_msg(cur_client.name, cur_client.id, get_client_name_by_id(has_up_out), has_up_out, inputLine));
+    }
+
+    if(has_up_in != -1 || has_up_out != -1){
+        broadcast_msg(broad_msg, shmclientTable);
     }
 }
 
@@ -476,7 +432,6 @@ int assign_user_id(){
     for(int i = 0; i < 30; i++){
         if(shmidTable[i] == 0){
             shmidTable[i] = 1;
-            cout << "assign_user_id: " << to_string(i+1) << endl;
             return i;
         }
     }
@@ -486,7 +441,6 @@ int assign_user_pipe_id(){
     for(int i = 0; i < 900; i++){
         if(shmUPidTable[i] == 0){
             shmUPidTable[i] = 1;
-            cout << "assign_user_pipe_id: " << to_string(i) << endl;
             return i;
         }
     }
@@ -641,6 +595,7 @@ bool user_pipe_exist(int sender_id, int recv_id){
 
 void broadcast_msg(string msg, client_shm *shmclientTable){
     char* tmp = strdup(msg.c_str());
+    cout << "broadcast " << msg << endl;
     for(int i=0; i<30; i++){
         if(shmidTable[i] == 1){
             strcpy(msgbuffer, msg.c_str());
@@ -650,16 +605,9 @@ void broadcast_msg(string msg, client_shm *shmclientTable){
 }
 
 string get_client_name_by_id(int id){
-    
     if(shmidTable[id-1] == 1){
         return shmclientTable[id-1].name;
     }
-    else{
-        cout << "get_client_name_by_id error:" << endl;
-        cout << "shmclientTable[id-1].name=" <<shmclientTable[id-1].name << " but shmidTable[id-1] == 0" << endl;
-        exit(0);
-    }
-    
 }
 
 void close_connection_handler(client_shm &cur_client){
@@ -667,8 +615,7 @@ void close_connection_handler(client_shm &cur_client){
     broadcast_msg(logout_msg(tmp), shmclientTable);
     shmidTable[cur_client.id-1] = 0;
 
-    //todo:delete related user pipe file
-
+    //delete related user pipe file
     for(int i=0; i<900; i++){
         string fileName= "user_pipe/";
         bool deleted = false;
@@ -690,10 +637,8 @@ void close_connection_handler(client_shm &cur_client){
         }
     }
 
-    cout << "close cur_client.socket_fd" << cur_client.socket_fd << endl;
     close(cur_client.socket_fd);
     exit(0);
-    //shmclientTable[cur_client.id-1] = (client)NULL;
 }
 
 client_shm* new_client_handler(int cli_socketfd, struct sockaddr_in &cli_addr, client_shm *shmclientTable){
@@ -705,8 +650,6 @@ client_shm* new_client_handler(int cli_socketfd, struct sockaddr_in &cli_addr, c
     send(cli_socketfd,welcome_msg.c_str(),welcome_msg.length(),0);
     int min_id = assign_user_id();
 
-    cout << min_id <<endl;
-
     string default_name = "(no name)";
     shmclientTable[min_id].id = min_id+1;
     strcpy(shmclientTable[min_id].name, default_name.c_str());
@@ -714,7 +657,6 @@ client_shm* new_client_handler(int cli_socketfd, struct sockaddr_in &cli_addr, c
     // strcpy(shmclientTable[min_id].ip, concat_ip(inet_ntoa(cli_addr.sin_addr), ntohs(cli_addr.sin_port)).c_str());
     shmclientTable[min_id].socket_fd = cli_socketfd;
     shmclientTable[min_id].p_id = getpid();
-    tmp_pid = getpid();
     cout << "new_client id = " << shmclientTable[min_id].id << endl;
     cout << "new_client socket_fd= " << shmclientTable[min_id].socket_fd << endl;
     
@@ -748,19 +690,12 @@ void sig_handler(int signo, siginfo_t *info, void *context){
 
         cout << "[Server]: release all shared memory success" << endl;
         exit(0);
-    }else if(signo == SIGCHLD){
-        // waitpid(0, &status, WNOHANG);
     }else if(signo == SIGUSR1){
-        cout << "client_sig_handler sender_pid = " << info->si_pid << endl;
-        for(int i=0; i<30; i++){
-            if(shmclientTable[i].p_id == getpid()){
-                send(shmclientTable[i].socket_fd, msgbuffer, strlen(msgbuffer), 0);
-                break;
-            }
+        if(send(cli_socketfd, msgbuffer, strlen(msgbuffer), 0) < 0){
+            cout << "send error" << endl;
         }
     }
 }
-
 
 void client_handler(client_shm &cur_client, client_shm *shmclientTable){
     char buf[buffersize];
@@ -770,24 +705,26 @@ void client_handler(client_shm &cur_client, client_shm *shmclientTable){
     vector<string> tokens;
 
     while((n = recv(cli_socketfd,buf,sizeof(buf),0)) != 0){
-        cout << "buf= " << buf<<"..."<<endl;
         string inputLine = buf;
         if(inputLine.find("\n") != string::npos){
             inputLine = inputLine.substr(0,inputLine.find("\n"));
         }
-        if(inputLine != "\r"){
-            line_count++;
-        }
-
+        
         if(inputLine == ""){
             //receive broadcast msg
             memset(buf, 0, sizeof(buf));
             continue;
         }
+
+        if(inputLine != "\r"){
+            line_count++;
+        }
+
         if(inputLine.find("\r") != string::npos){
             int tmp = inputLine.find("\r");
             inputLine = inputLine.substr(0,tmp);
         }
+        cout << "inputLine= " << inputLine << "..." << endl;
         //cout << "line:" <<line_count<<endl;
         if(inputLine.compare("exit") == 0){
             close_connection_handler(cur_client);
@@ -803,7 +740,7 @@ void client_handler(client_shm &cur_client, client_shm *shmclientTable){
             char* tmp = getenv(tokens[1].c_str());
             char tmp_buf[500];
             sprintf(tmp_buf, "%s\n", tmp);
-            send(cli_socketfd,tmp_buf,strlen(tmp_buf)+1,0);
+            send(cli_socketfd,tmp_buf,strlen(tmp_buf),0);
         }else if(inputLine.find("name") == 0){
             if(user_name_exist(tokens[1])){
                 string tmp = name_exist_msg(tokens[1]);
@@ -834,25 +771,13 @@ void client_handler(client_shm &cur_client, client_shm *shmclientTable){
             string info = who_msg_shm(shmidTable, shmclientTable, cur_client.id);
             send(cli_socketfd, info.c_str(), info.length(), 0);
         }else{
-            parse_cmd(cli_socketfd, line_count, tokens, cur_client);
+            parse_cmd(cli_socketfd, line_count, tokens, cur_client, inputLine);
         }
 
         for(deque<command>::iterator it = current_job_queue.begin(); it != current_job_queue.end(); it++){
             //if this command hasn't create pipe before,create one
             if(!it->before_numbered_pipe && !it->is_write_file){
                 set_pipe_array(it->pipe_arr);
-            }
-
-            //broadcast user pipe order: read > write
-            if(it->is_user_pipe_in){
-                //broadcast write to user pipe msg
-                string msg = read_from_user_pipe_msg(get_client_name_by_id(it->user_pipe_src_id), it->user_pipe_src_id, cur_client.name, cur_client.id, inputLine);
-                broadcast_msg(msg, shmclientTable);
-            }
-            if(it->is_user_pipe_out){
-                //broadcast write to user pipe msg 
-                string msg = pipe_to_user_msg(cur_client.name, cur_client.id, get_client_name_by_id(it->user_pipe_dest_id), it->user_pipe_dest_id, inputLine);
-                broadcast_msg(msg, shmclientTable);
             }
 
             signal(SIGCHLD, childHandler);
@@ -902,6 +827,7 @@ void client_handler(client_shm &cur_client, client_shm *shmclientTable){
                     fileName.append(to_string(it->user_pipe_src_id)+"_"+to_string(cur_client.id)+".txt");
                     set_read_file(fileName);
                 }
+
                 execute_cmd(*it);
 
                 exit(1);
@@ -957,6 +883,8 @@ void client_handler(client_shm &cur_client, client_shm *shmclientTable){
                 }
             }
         }
+
+        
         
         current_job_queue.clear();
         memset(buf, 0, sizeof(buf));
